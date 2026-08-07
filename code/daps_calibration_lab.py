@@ -37,8 +37,31 @@ from daps_excel_segmenter import (
     read_table,
 )
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-OUTPUT_DIR = Path(__file__).resolve().parents[1] / "data" / "calibration_outputs"
+
+def resolve_output_dir() -> Path:
+    configured_dir = os.environ.get("DAPS_OUTPUT_DIR") or os.environ.get("DAPS_STORAGE_DIR")
+    if configured_dir:
+        return Path(configured_dir)
+
+    railway_volume = Path("/data")
+    is_railway = any(
+        os.environ.get(name)
+        for name in (
+            "RAILWAY_ENVIRONMENT",
+            "RAILWAY_ENVIRONMENT_NAME",
+            "RAILWAY_PROJECT_ID",
+            "RAILWAY_SERVICE_ID",
+        )
+    )
+    if is_railway and railway_volume.exists():
+        return railway_volume
+
+    return PROJECT_ROOT / "data" / "calibration_outputs"
+
+
+OUTPUT_DIR = resolve_output_dir()
 DB_PATH = OUTPUT_DIR / "daps_calibration.sqlite3"
 SIGNALS = ["C_t", "M_t", "A_t", "R_t"]
 SIGNAL_COLUMNS = {

@@ -78,6 +78,34 @@ The app automatically reads Railway's `PORT` environment variable and binds to `
 
 Research data, SQLite databases, generated workbooks, manuscripts, proposal files, and local virtual environments are excluded from GitHub through `.gitignore`. Upload transcript files through the web app after deployment.
 
+### Persistent SQLite Storage on Railway
+
+To keep the Calibration Lab SQLite database after redeployments, attach a Railway Volume to the app service.
+
+Recommended Railway volume setting:
+
+```text
+Mount path: /data
+```
+
+When the app detects Railway and the `/data` volume, it stores the current SQLite database at:
+
+```text
+/data/daps_calibration.sqlite3
+```
+
+Local runs still use:
+
+```text
+data/calibration_outputs/daps_calibration.sqlite3
+```
+
+You can also override the storage directory manually with:
+
+```text
+DAPS_OUTPUT_DIR=/data
+```
+
 ## Expected Input Format
 
 The Calibration Lab accepts CSV or Excel transcript files. Recommended columns are:
@@ -214,7 +242,8 @@ Use the guided review page instead of editing a wide spreadsheet. Work is separa
 The app stores progress in:
 
 ```text
-data/calibration_outputs/daps_calibration.sqlite3
+Railway: /data/daps_calibration.sqlite3
+Local: data/calibration_outputs/daps_calibration.sqlite3
 ```
 
 Rows are considered complete when these fields are filled:
