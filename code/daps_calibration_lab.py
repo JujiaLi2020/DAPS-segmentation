@@ -63,6 +63,7 @@ def resolve_output_dir() -> Path:
 
 OUTPUT_DIR = resolve_output_dir()
 DB_PATH = OUTPUT_DIR / "daps_calibration.sqlite3"
+DEFAULT_VOCABULARY = SignalVocabulary()
 SIGNALS = ["C_t", "M_t", "A_t", "R_t"]
 SIGNAL_COLUMNS = {
     "C_t": "cognitive_transition",
@@ -728,6 +729,26 @@ STEP0_FIELD_HELP = {
         "Formula symbol: rho. Non-maximum suppression radius; nearby candidate boundaries compete so one local shift is not split multiple times. "
         "Suggested: rho = 6."
     ),
+    "Task-density vocabulary": (
+        "Formula symbol: V_task. Terms used to estimate task-word density around a candidate gap. "
+        "Use domain/task objects and actions; keep broad filler words out."
+    ),
+    "Cognitive transition vocabulary": (
+        "Formula symbol: V_C for C_t. Cues for shifts in object, action, strategy, comparison, or reasoning state. "
+        "Suggested: prefer task-relevant action and relation terms over generic words."
+    ),
+    "Metacognitive reset vocabulary": (
+        "Formula symbol: V_M for M_t. Cues for monitoring, correction, uncertainty, realization, or restart. "
+        "Suggested: use phrases such as wait, actually, I don't know, I think, maybe with caution."
+    ),
+    "Affective friction vocabulary": (
+        "Formula symbol: V_A for A_t. Cues for difficulty, frustration, confusion, effort, or affective resistance. "
+        "Suggested: avoid ambiguous words unless human calibration supports them."
+    ),
+    "Rhetorical/structural break vocabulary": (
+        "Formula symbol: V_R for R_t. Cues for discourse organization, sequencing, speaker/event shifts, and structural transitions. "
+        "Suggested: then, next, okay, so, but, pause/event markers."
+    ),
 }
 
 
@@ -774,6 +795,11 @@ def run_initial_segmentation(
     max_segment_tokens: int,
     max_segments_per_record: int,
     nms_radius: int,
+    task_vocab: str,
+    cognitive_vocab: str,
+    metacognitive_vocab: str,
+    affective_vocab: str,
+    structural_vocab: str,
 ) -> tuple[str | None, pd.DataFrame, pd.DataFrame, str]:
     path = _path_from_upload(raw_file)
     if path is None:
@@ -797,6 +823,13 @@ def run_initial_segmentation(
 
         requested_text_cols = ",".join(_split_columns(text_columns) or []) or None
         selected_text_columns = infer_text_columns(df, requested_text_cols, selected_id)
+        vocabulary = SignalVocabulary.from_texts(
+            task=task_vocab,
+            cognitive=cognitive_vocab,
+            metacognitive=metacognitive_vocab,
+            affective=affective_vocab,
+            structural=structural_vocab,
+        )
 
         segmenter = DAPSSegmenter(
             DAPSConfig(
@@ -818,7 +851,7 @@ def run_initial_segmentation(
                 sentence_boundary_boost=0.08,
             ),
             SimilarityModel(embedding_model.strip() or "lexical"),
-            SignalVocabulary(),
+            vocabulary,
         )
 
         metadata_columns = [
@@ -877,6 +910,11 @@ def run_initial_segmentation(
                 {"Field": "Text columns", "Value": ", ".join(selected_text_columns)},
                 {"Field": "Clean text", "Value": clean_text},
                 {"Field": "Encoding/artifact count cleaned", "Value": artifact_count},
+                {"Field": "Task vocabulary size", "Value": len(vocabulary.task)},
+                {"Field": "C_t vocabulary size", "Value": len(vocabulary.cognitive)},
+                {"Field": "M_t vocabulary size", "Value": len(vocabulary.metacognitive)},
+                {"Field": "A_t vocabulary size", "Value": len(vocabulary.affective)},
+                {"Field": "R_t vocabulary size", "Value": len(vocabulary.structural)},
                 {"Field": "Segments", "Value": len(segments_df)},
                 {"Field": "Boundaries", "Value": len(boundaries_df)},
             ]
@@ -889,7 +927,9 @@ def run_initial_segmentation(
 
         status = (
             f"Segmented {len(df)} source rows into {len(segments_df)} segments and "
-            f"{len(boundaries_df)} boundary evidence rows. Cleaned {artifact_count} encoding artifact(s)."
+            f"{len(boundaries_df)} boundary evidence rows. Cleaned {artifact_count} encoding artifact(s). "
+            f"Vocabulary sizes: C={len(vocabulary.cognitive)}, M={len(vocabulary.metacognitive)}, "
+            f"A={len(vocabulary.affective)}, R={len(vocabulary.structural)}, Task={len(vocabulary.task)}."
         )
         parameters = {
             "id_column": selected_id,
@@ -904,6 +944,11 @@ def run_initial_segmentation(
             "max_segment_tokens": max_segment_tokens,
             "max_segments_per_record": max_segments_per_record,
             "nms_radius": nms_radius,
+            "task_vocab_size": len(vocabulary.task),
+            "cognitive_vocab_size": len(vocabulary.cognitive),
+            "metacognitive_vocab_size": len(vocabulary.metacognitive),
+            "affective_vocab_size": len(vocabulary.affective),
+            "structural_vocab_size": len(vocabulary.structural),
         }
         replace_current_table("step0_segments", segments_df)
         replace_current_table("step0_boundaries", boundaries_df)
@@ -940,6 +985,11 @@ def run_initial_segmentation_and_inspect(
     max_segment_tokens: int,
     max_segments_per_record: int,
     nms_radius: int,
+    task_vocab: str,
+    cognitive_vocab: str,
+    metacognitive_vocab: str,
+    affective_vocab: str,
+    structural_vocab: str,
 ) -> tuple[
     str | None,
     pd.DataFrame,
@@ -968,6 +1018,11 @@ def run_initial_segmentation_and_inspect(
         max_segment_tokens,
         max_segments_per_record,
         nms_radius,
+        task_vocab,
+        cognitive_vocab,
+        metacognitive_vocab,
+        affective_vocab,
+        structural_vocab,
     )
     if not output_path:
         return (
@@ -2478,6 +2533,44 @@ def build_app() -> gr.Blocks:
                     raw_max_segment_tokens = step0_slider("Maximum segment tokens", "L_max", 30, 120, 60, 5)
                     raw_max_segments_per_record = step0_slider("Maximum segments per record", "K_max", 0, 200, 80, 5)
                     raw_nms_radius = step0_slider("NMS radius", "rho", 1, 15, 6, 1)
+            with gr.Accordion("Signal vocabularies", open=False):
+                gr.Markdown("Edit words or phrases separated by commas, spaces, or new lines. Step 0 uses these vocabularies immediately when computing DAPS signal scores.")
+                help_label("Task-density vocabulary")
+                raw_task_vocab = gr.Textbox(
+                    value=DEFAULT_VOCABULARY.as_text("task"),
+                    lines=3,
+                    show_label=False,
+                )
+                with gr.Row():
+                    with gr.Column():
+                        help_label("Cognitive transition vocabulary", "V_C")
+                        raw_cognitive_vocab = gr.Textbox(
+                            value=DEFAULT_VOCABULARY.as_text("cognitive"),
+                            lines=5,
+                            show_label=False,
+                        )
+                    with gr.Column():
+                        help_label("Metacognitive reset vocabulary", "V_M")
+                        raw_metacognitive_vocab = gr.Textbox(
+                            value=DEFAULT_VOCABULARY.as_text("metacognitive"),
+                            lines=5,
+                            show_label=False,
+                        )
+                with gr.Row():
+                    with gr.Column():
+                        help_label("Affective friction vocabulary", "V_A")
+                        raw_affective_vocab = gr.Textbox(
+                            value=DEFAULT_VOCABULARY.as_text("affective"),
+                            lines=5,
+                            show_label=False,
+                        )
+                    with gr.Column():
+                        help_label("Rhetorical/structural break vocabulary", "V_R")
+                        raw_structural_vocab = gr.Textbox(
+                            value=DEFAULT_VOCABULARY.as_text("structural"),
+                            lines=5,
+                            show_label=False,
+                        )
             with gr.Row():
                 raw_segment_button = gr.Button("Run Initial DAPS Segmentation", variant="primary")
                 load_sqlite_button = gr.Button("Load Latest SQLite State", variant="secondary")
@@ -2685,6 +2778,11 @@ def build_app() -> gr.Blocks:
                 raw_max_segment_tokens,
                 raw_max_segments_per_record,
                 raw_nms_radius,
+                raw_task_vocab,
+                raw_cognitive_vocab,
+                raw_metacognitive_vocab,
+                raw_affective_vocab,
+                raw_structural_vocab,
             ],
             outputs=[
                 raw_segmented_file,
