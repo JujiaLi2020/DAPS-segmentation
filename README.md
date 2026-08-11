@@ -191,6 +191,7 @@ Run pre-validation before annotation. The app reports:
 - selected versus non-selected semantic gravity
 - selected versus non-selected transition pressure
 - signal saturation summaries
+- number and rate of segments assigned to each signal group
 - boundary legality diagnostics
 
 Status values are shown as `PASS`, `WARNING`, `FAIL`, or `INFO`.

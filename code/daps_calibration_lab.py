@@ -71,6 +71,18 @@ SIGNAL_COLUMNS = {
     "A_t": "affective_friction",
     "R_t": "structural_break",
 }
+SEGMENT_SIGNAL_COLUMNS = {
+    "C_t": "Mean_C_t",
+    "M_t": "Mean_M_t",
+    "A_t": "Mean_A_t",
+    "R_t": "Mean_R_t",
+}
+SEGMENT_TYPE_NAMES = {
+    "C_t": "cognitive",
+    "M_t": "metacognitive",
+    "A_t": "affective",
+    "R_t": "structural",
+}
 TOKEN_RE = re.compile(r"[A-Za-z]+(?:['’][A-Za-z]+)?")
 
 APP_CSS = """
@@ -1271,13 +1283,14 @@ def _apply_signal_status(signals: pd.DataFrame) -> pd.DataFrame:
     for _, row in signals.iterrows():
         median = _to_float(row.get("Median"))
         pct_high = _to_float(row.get("Pct > .80")) or 0.0
+        segment_rate = _to_float(row.get("Signal-positive rate")) or 0.0
         saturated = bool(row.get("Saturation warning", False))
         if median is None:
             statuses.append("WARNING")
             notes.append("Missing signal values.")
-        elif saturated or median > 0.75 or pct_high > 0.50:
+        elif saturated or median > 0.75 or pct_high > 0.50 or segment_rate > 0.60:
             statuses.append("WARNING")
-            notes.append("Signal may be saturated; reduce cue breadth or weight before vocabulary training.")
+            notes.append("Signal may be saturated or assigned to too many segments; reduce cue breadth or weight before vocabulary training.")
         else:
             statuses.append("PASS")
             notes.append("Signal distribution has usable separation for calibration.")
@@ -1297,6 +1310,11 @@ def _status_table_html(frame: pd.DataFrame, title: str) -> str:
             "Metric",
             "Signal",
             "Value",
+            "Primary segments",
+            "Primary segment rate",
+            "Signal-positive segments",
+            "Signal-positive rate",
+            "Mean segment signal",
             "Mean",
             "Median",
             "P90",
@@ -1457,12 +1475,33 @@ def inspect_segmentation_workbook(segmentation_workbook: str | None) -> tuple[pd
             )
 
         signal_rows = []
+        segment_count = max(1, len(segments))
+        segment_types = (
+            segments["Segment_Type"].fillna("").astype(str).str.lower()
+            if "Segment_Type" in segments.columns
+            else pd.Series("", index=segments.index)
+        )
         for signal, column in SIGNAL_COLUMNS.items():
             if column in boundaries.columns:
                 values = boundaries[column].dropna()
+                type_name = SEGMENT_TYPE_NAMES[signal]
+                primary_segments = int((segment_types == type_name).sum())
+                mean_column = SEGMENT_SIGNAL_COLUMNS[signal]
+                if mean_column in segments.columns:
+                    segment_values = pd.to_numeric(segments[mean_column], errors="coerce").dropna()
+                    signal_positive_segments = int((segment_values >= 0.50).sum())
+                    mean_segment_signal = round(float(segment_values.mean()), 3) if not segment_values.empty else None
+                else:
+                    signal_positive_segments = primary_segments
+                    mean_segment_signal = None
                 signal_rows.append(
                     {
                         "Signal": signal,
+                        "Primary segments": primary_segments,
+                        "Primary segment rate": round(primary_segments / segment_count, 3),
+                        "Signal-positive segments": signal_positive_segments,
+                        "Signal-positive rate": round(signal_positive_segments / segment_count, 3),
+                        "Mean segment signal": mean_segment_signal,
                         "Mean": round(float(values.mean()), 3),
                         "Median": round(float(values.median()), 3),
                         "P90": round(float(values.quantile(0.90)), 3),
